@@ -3,7 +3,52 @@ import UIKit
 import Photos
 @testable import PicSwype
 
+private final class RepeatingImmichBatch: URLProtocol {
+    static let preview = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { _ in }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        let url = request.url!
+        let isSearch = url.path.hasSuffix("/search/random")
+        let batch = #"[$A,$A,$B,$A,$B]"#
+            .replacingOccurrences(of: "$A", with: #"{"id":"first","type":"IMAGE"}"#)
+            .replacingOccurrences(of: "$B", with: #"{"id":"second","type":"IMAGE"}"#)
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil,
+            headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: isSearch ? Data(batch.utf8) : Self.preview)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
 @MainActor final class LibraryTests: XCTestCase {
+    func testImmichRepeatedBatchesAfterKeepUndoQueueAndRestart() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [RepeatingImmichBatch.self]
+        let model = Library(.immich, session: URLSession(configuration: config))
+        model.server = "https://" + UUID().uuidString + ".example"
+        defer {
+            _ = DeletionQueue.shared.removeUnstarted(id: "second", library: model)
+            for suffix in [".seen", ".marked", ".kept", ".trashed"] {
+                UserDefaults.standard.removeObject(forKey: model.progressKey + suffix)
+            }
+        }
+        await model.reload()
+        XCTAssertEqual(model.assets.map(\.id), ["first", "second"])
+        await model.act(delete: false)
+        await model.goBack()
+        XCTAssertEqual(model.assets.first?.id, "first")
+        XCTAssertEqual(model.kept, 0)
+        await model.act(delete: false)
+        await model.act(delete: true)
+        XCTAssertEqual(model.marked, ["second"])
+        await model.reload()
+        XCTAssertNil(model.picture)
+        XCTAssertTrue(model.assets.isEmpty)
+        await model.reload(reset: true)
+        XCTAssertEqual(model.assets.map(\.id), ["first"])
+    }
+
     func testAuthorizedApplePhotoPreviewAndMarkUndo() async throws {
         #if targetEnvironment(simulator)
         try XCTSkipUnless(PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
@@ -55,7 +100,16 @@ import Photos
         XCTAssertEqual(reopened.kept, 1)
         XCTAssertTrue(reopened.assets.isEmpty)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).count, 2)
-        reopened.unmark(try XCTUnwrap(reopened.marked.first))
+        let queued = try XCTUnwrap(reopened.marked.first)
+        let added = root.appendingPathComponent("new.png")
+        try XCTUnwrap(image.pngData()).write(to: added)
+        await reopened.connect()
+        XCTAssertEqual(reopened.assets.map(\.id), [added.path])
+        await reopened.act(delete: false)
+        await reopened.reload(reset: true)
+        XCTAssertEqual(Set(reopened.assets.map(\.id)), [first, added.path])
+        XCTAssertEqual(reopened.marked, [queued])
+        reopened.unmark(queued)
         await reopened.reload()
         XCTAssertNotNil(reopened.picture)
     }
