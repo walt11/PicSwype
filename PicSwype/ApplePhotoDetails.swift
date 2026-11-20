@@ -151,11 +151,6 @@ struct ApplePhotoDetailsView: View {
                         .textSelection(.enabled)
                 }
             }
-            Section {
-                Text("iOS doesn’t let other apps open Photos at a specific picture. Search Photos for the date " + (details.albums.isEmpty ? "" : "or album ") + "above to find it there.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
