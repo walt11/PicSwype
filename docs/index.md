@@ -1,3 +1,7 @@
+---
+title: PicSwype privacy policy
+---
+
 # PicSwype privacy policy
 
 Effective November 20, 2026

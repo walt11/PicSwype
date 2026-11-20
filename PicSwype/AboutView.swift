@@ -8,7 +8,7 @@ struct AboutView: View {
             List {
                 Section {
                     Text("Copyright © 2026 John Walter")
-                    Link("Privacy policy", destination: URL(string: "https://github.com/walt11/PicSwype/blob/main/docs/index.md")!)
+                    Link("Privacy policy", destination: URL(string: "https://walt11.github.io/PicSwype/")!)
                 }
                 Section("Licenses") {
                     notice("PicSwype", resource: "LICENSE", extension: nil)
