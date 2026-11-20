@@ -450,7 +450,11 @@ struct ReviewView: View {
     @Environment(\.openURL) private var openURL
 
     private var openPhotoTitle: String {
-        source == .synology ? "Open Synology Photos library" : "Open in " + source.rawValue
+        switch source {
+        case .apple: return "Photo Details"
+        case .synology: return "Open Synology Photos library"
+        case .immich: return "Open in Immich"
+        }
     }
 
     private var photoDestination: (url: URL, fallback: URL?)? {
@@ -465,10 +469,7 @@ struct ReviewView: View {
             link.queryItems = [URLQueryItem(name: "id", value: asset.id)]
             fallback = server.appendingPathComponent("photos").appendingPathComponent(asset.id)
         case .apple:
-            link.scheme = "photos-navigation"
-            link.host = "asset"
-            link.queryItems = [URLQueryItem(name: "uuid", value: asset.id.components(separatedBy: "/")[0])]
-            fallback = URL(string: "photos-redirect://")
+            return nil // iOS can’t open Photos at a specific asset; ApplePhotoInfoButton shows details instead.
         case .synology:
             guard let base = library.remote?.base,
                   let portal = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
@@ -480,8 +481,12 @@ struct ReviewView: View {
     }
 
     @ViewBuilder private var openPhotoButton: some View {
-        if library.picture != nil, let destination = photoDestination {
+        if library.picture != nil, source == .apple, let asset = library.assets.first {
+            ApplePhotoInfoButton(id: asset.id, title: openPhotoTitle)
+                .disabled(library.busy)
+        } else if library.picture != nil, library.assets.first != nil, source != .synology || library.remote != nil {
             Button {
+                guard let destination = photoDestination else { return }
                 openURL(destination.url) { opened in
                     guard !opened else { return }
                     if let fallback = destination.fallback {
@@ -533,8 +538,8 @@ struct ReviewView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .opacity(underneath ? 0 : 1)
             photo()
-            if photoDestination != nil {
-                Label(openPhotoTitle, systemImage: "arrow.up.forward.app")
+            if source != .synology || library.remote != nil {
+                Label(openPhotoTitle, systemImage: source == .apple ? "info.circle" : "arrow.up.forward.app")
                     .hidden()
                     .overlay {
                         if !underneath { openPhotoButton.disabled(transitioning) }

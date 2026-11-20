@@ -13,6 +13,7 @@
 		22C52E851A20B60496D4A055 /* SynologyPhotos.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1F811A3C700E83E3AA26E6 /* SynologyPhotos.swift */; };
 		435DEB3CA6EAE42BF1F20022 /* SynologyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B39FEC3DEA055BC1E2685E2 /* SynologyTests.swift */; };
 		5380738F9D102677B85CE0CD /* DeletionQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 005FFAEA2FA36CAF464E51D0 /* DeletionQueueTests.swift */; };
+		64EA558A7CD40E0BB0107E7C /* ApplePhotoDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF6144FE080D39467DB826AF /* ApplePhotoDetails.swift */; };
 		695DE0BB92BD700F1B4186E9 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF398F3B7145BA1216B4D793 /* App.swift */; };
 		749363A12A786C68033323AC /* LibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 856249B1863023534C16442A /* LibraryTests.swift */; };
 		78ECD3317807E5B41C960B52 /* DeletionQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F371A80E46CA556B6F3AC9E /* DeletionQueue.swift */; };
@@ -60,6 +61,7 @@
 		CEED4F0A405626E6ABB45BD3 /* PhotoSources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSources.swift; sourceTree = "<group>"; };
 		D0F03D76CE1FB6D0D4690CA9 /* LivePair.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; path = LivePair.zip; sourceTree = "<group>"; };
 		E8A6956E5681DDCE64A38EFE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EF6144FE080D39467DB826AF /* ApplePhotoDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplePhotoDetails.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,6 +103,7 @@
 			children = (
 				6CCBD0065F7B45F6F9FAAE76 /* AboutView.swift */,
 				AF398F3B7145BA1216B4D793 /* App.swift */,
+				EF6144FE080D39467DB826AF /* ApplePhotoDetails.swift */,
 				97F5FBBA1D6CA475FB910540 /* Assets.xcassets */,
 				8F371A80E46CA556B6F3AC9E /* DeletionQueue.swift */,
 				E8A6956E5681DDCE64A38EFE /* Info.plist */,
@@ -248,6 +251,7 @@
 			files = (
 				A2CAD01F7048F500686BB49B /* AboutView.swift in Sources */,
 				695DE0BB92BD700F1B4186E9 /* App.swift in Sources */,
+				64EA558A7CD40E0BB0107E7C /* ApplePhotoDetails.swift in Sources */,
 				78ECD3317807E5B41C960B52 /* DeletionQueue.swift in Sources */,
 				8B194F62A01A5597AA111153 /* LinkedPhoto.swift in Sources */,
 				1ADCE014295BC7BCE364A253 /* MatchQueue.swift in Sources */,
@@ -273,7 +277,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				INFOPLIST_FILE = PicSwype/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -308,7 +312,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				INFOPLIST_FILE = PicSwype/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
