@@ -40,13 +40,13 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UILaunchScreen: {}
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
-        NSPhotoLibraryUsageDescription: PicSwype shows your Apple Photos, finds matching copies in linked libraries, and deletes the copies you select in the deletion queue.
+          NSAllowsLocalNetworking: true
+        NSPhotoLibraryUsageDescription: PicSwype shows your photos and videos, finds matching copies in linked libraries, and deletes the copies you select in the deletion queue.
         NSLocalNetworkUsageDescription: PicSwype connects to your Immich or Synology Photos server to show photos and delete the copies you select.
     settings:
       base:
         MARKETING_VERSION: '1.0'
-        CURRENT_PROJECT_VERSION: 5
+        CURRENT_PROJECT_VERSION: 10
         PRODUCT_BUNDLE_IDENTIFIER: com.walt.PicSwype
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: '1,2'

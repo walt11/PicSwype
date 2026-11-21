@@ -37,6 +37,7 @@ import XCTest
             for suffix in [".marked", ".seen", ".kept", ".trashed"] {
                 UserDefaults.standard.removeObject(forKey: model.progressKey + suffix)
             }
+            SeenStore.remove(model.progressKey)
         }
         model.connected = true
         let queue = DeletionQueue(defaults: defaults)
@@ -47,7 +48,7 @@ import XCTest
         XCTAssertTrue(DeletionQueue(defaults: defaults).entries.isEmpty)
         XCTAssertEqual(model.kept, 1)
         XCTAssertEqual(model.trashed, 0)
-        XCTAssertEqual(UserDefaults.standard.stringArray(forKey: model.progressKey + ".seen"), ["keep-me"])
+        XCTAssertEqual(SeenStore.load(model.progressKey), ["keep-me"])
     }
 
     func testQueuedThumbnailAvailableAfterReopeningWithoutLibrary() async throws {

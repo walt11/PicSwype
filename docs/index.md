@@ -6,11 +6,11 @@ title: PicSwype privacy policy
 
 Effective November 20, 2026
 
-PicSwype is a photo review app by John Walter. You choose which libraries it can access. The developer does not operate a photo server, receive your library or review history, sell personal information, or use advertising or analytics SDKs in the app.
+PicSwype is a photo and video review app by John Walter. You choose which libraries it can access. The developer does not operate a photo server, receive your library or review history, sell personal information, or use advertising or analytics SDKs in the app.
 
 ## Photo access and matching
 
-PicSwype reads photo identifiers, filenames, previews, and originals from the libraries you connect. It uses this information to show photos and find copies when you enable library linking. Matching runs on your device. PicSwype can send a photo checksum or filename to your Immich server to look for candidates and download originals from your connected services to verify them. Access to Apple Photos follows your iOS permission selection and can include downloading originals from iCloud through Apple Photos.
+PicSwype reads photo and video identifiers, filenames, previews, and originals from the libraries you connect. It uses this information to show photos, play videos, and find copies when you enable library linking. Matching runs on your device. PicSwype can send a file checksum or filename to your Immich server to look for candidates and download originals from your connected services to verify them. Access to Apple Photos follows your iOS permission selection and can include downloading originals from iCloud through Apple Photos.
 
 ## Connections and storage
 

@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 /// iOS has no supported way to open Apple Photos at a specific photo, so PicSwype shows the
 /// photo's details itself and offers the original file through the share sheet.
 struct ApplePhotoDetails {
+    var isVideo: Bool
     var filename: String?
     var created: Date?
     var modified: Date?
@@ -29,7 +30,7 @@ struct ApplePhotoDetails {
                     }
                 }
             }
-            var kinds: [String] = []
+            var kinds: [String] = asset.mediaType == .video ? ["Video"] : []
             let subtypes = asset.mediaSubtypes
             if subtypes.contains(.photoLive) { kinds.append("Live Photo") }
             if subtypes.contains(.photoScreenshot) { kinds.append("Screenshot") }
@@ -38,9 +39,10 @@ struct ApplePhotoDetails {
             if subtypes.contains(.photoDepthEffect) { kinds.append("Portrait") }
             if asset.burstIdentifier != nil { kinds.append("Burst") }
             let resources = PHAssetResource.assetResources(for: asset)
-            if resources.contains(where: { $0.type == .fullSizePhoto }) { kinds.append("Edited") }
-            let original = resources.first { $0.type == .photo } ?? resources.first
+            if resources.contains(where: { $0.type == .fullSizePhoto || $0.type == .fullSizeVideo }) { kinds.append("Edited") }
+            let original = resources.first { $0.type == .photo || $0.type == .video } ?? resources.first
             return ApplePhotoDetails(
+                isVideo: asset.mediaType == .video,
                 filename: original?.originalFilename,
                 created: asset.creationDate,
                 modified: asset.modificationDate,
@@ -67,17 +69,27 @@ struct ApplePhotoFile: Transferable {
             throw Failure(message: "This photo is no longer accessible.")
         }
         let resources = PHAssetResource.assetResources(for: asset)
-        guard let resource = resources.first(where: { $0.type == .fullSizePhoto })
-                ?? resources.first(where: { $0.type == .photo }) ?? resources.first else {
+        guard let resource = resources.first(where: { $0.type == .fullSizePhoto || $0.type == .fullSizeVideo })
+                ?? resources.first(where: { $0.type == .photo || $0.type == .video }) ?? resources.first else {
             throw Failure(message: "Photos has no file for this photo.")
         }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        // Reuse one folder and clear the previous export, so shared originals don't pile up in tmp.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SharedOriginal", isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let file = folder.appendingPathComponent(resource.originalFilename)
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
         try await PHAssetResourceManager.default().writeData(for: resource, toFile: file, options: options)
         return file
+    }
+}
+
+private struct AppleVideoFile: Transferable {
+    let id: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .movie) { SentTransferredFile(try await ApplePhotoFile(id: $0.id).export()) }
     }
 }
 
@@ -105,13 +117,17 @@ struct ApplePhotoDetailsView: View {
                 else if let error { ContentUnavailableView("Details Unavailable", systemImage: "photo", description: Text(error)) }
                 else { ProgressView() }
             }
-            .navigationTitle("Photo Details")
+            .navigationTitle(details?.isVideo == true ? "Video Details" : "Photo Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
                 if details != nil {
                     ToolbarItem(placement: .topBarLeading) {
-                        ShareLink(item: ApplePhotoFile(id: id), preview: SharePreview(details?.filename ?? "Photo"))
+                        if details?.isVideo == true {
+                            ShareLink(item: AppleVideoFile(id: id), preview: SharePreview(details?.filename ?? "Video"))
+                        } else {
+                            ShareLink(item: ApplePhotoFile(id: id), preview: SharePreview(details?.filename ?? "Photo"))
+                        }
                     }
                 }
             }

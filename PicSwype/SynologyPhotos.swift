@@ -15,6 +15,9 @@ import ZIPFoundation
     private var challenge: LoginChallenge?
     private var items: [String: Item] = [:]
 
+    private var videosBySize: [Int?: [Item]] = [:]
+    private var photosBySize: [Int?: [Item]] = [:]
+
     struct Item: Decodable {
         let id: Int
         let filesize: Int?
@@ -40,7 +43,7 @@ import ZIPFoundation
         routes = try decode(data, as: [String: APIInfo].self)
     }
 
-    private func post(_ path: String, _ fields: [String: String]) async throws -> Data {
+    private func formRequest(_ path: String, _ fields: [String: String]) throws -> URLRequest {
         guard !path.contains(".."), !path.contains(":"), !path.hasPrefix("/") else { throw ConnectionError.invalidResponse }
         var req = URLRequest(url: base.appendingPathComponent("webapi").appendingPathComponent(path))
         req.httpMethod = "POST"
@@ -49,7 +52,11 @@ import ZIPFoundation
         req.httpBody = Data(fields.map { key, value in
             key.addingPercentEncoding(withAllowedCharacters: allowed)! + "=" + value.addingPercentEncoding(withAllowedCharacters: allowed)!
         }.joined(separator: "&").utf8)
-        let (data, response) = try await session.data(for: req)
+        return req
+    }
+
+    private func post(_ path: String, _ fields: [String: String]) async throws -> Data {
+        let (data, response) = try await session.data(for: formRequest(path, fields))
         guard let http = response as? HTTPURLResponse else { throw ConnectionError.invalidResponse }
         guard http.statusCode == 200 else { throw ConnectionError.http(http.statusCode) }
         return data
@@ -105,29 +112,50 @@ import ZIPFoundation
             guard !page.isEmpty else { break }
             guard page.last?.id != previousLast else { throw ConnectionError.invalidResponse }
             previousLast = page.last?.id
-            for item in page where item.type != "video" && !(item.type == "live" && ["mov","mp4","m4v"].contains((item.filename as NSString).pathExtension.lowercased())) && item.additional?.thumbnail != nil {
+            for item in page where !(item.type == "live" && ["mov","mp4","m4v"].contains((item.filename as NSString).pathExtension.lowercased())) && (item.additional?.thumbnail != nil || item.type == "video") {
                 found[String(item.id)] = item
             }
             offset += page.count
         }
+        videosBySize = Dictionary(grouping: found.values.filter { $0.type == "video" }, by: \.filesize)
+        photosBySize = Dictionary(grouping: found.values.filter { $0.type == "photo" }, by: \.filesize)
         items = found
-        return found.map { Asset(id: $0.key, type: "IMAGE", originalFileName: $0.value.filename) }.shuffled()
+        return found.map { Asset(id: $0.key, type: $0.value.type == "video" ? "VIDEO" : "IMAGE", originalFileName: $0.value.filename) }.shuffled()
     }
 
-    func possibleCopies(byteCount: Int, filename: String?, includeUnknownSizes: Bool = false) -> [String] {
-        items.values.filter { $0.type == "photo" && ($0.filesize == byteCount || ($0.filesize == nil && (includeUnknownSizes || $0.filename == filename))) }
+    func possibleCopies(byteCount: Int, filename: String?, includeUnknownSizes: Bool = false, video: Bool = false) -> [String] {
+        let index = video ? videosBySize : photosBySize
+        let unknown = index[nil, default: []]
+        let candidates = index[byteCount, default: []] + (includeUnknownSizes ? unknown : unknown.filter { $0.filename == filename })
+        return candidates
             .sorted { ($0.filename == filename ? 0 : 1, $0.id) < ($1.filename == filename ? 0 : 1, $1.id) }
             .map { String($0.id) }
     }
 
     func original(_ id: String) async throws -> Data {
         guard let item = items[id], isStill(id) else { throw Failure(message: "Linking is available for still photos.") }
+        let (version, fields) = downloadFields(item)
+        let data = try await call("SYNO.Foto.Download", version, "download", fields)
+        return try await Self.stillOriginal(data, filename: item.filename)
+    }
+
+    private func downloadFields(_ item: Item) -> (Int, [String: String]) {
         var fields = ["item_id": "[\(item.id)]", "force_download": "true"]
         let version = routes["SYNO.Foto.Download"]?.maxVersion ?? 1
         if version >= 2 { fields["download_type"] = "source" }
         if let thumb = item.additional?.thumbnail { fields["cache_key"] = thumb.cache_key }
-        let data = try await call("SYNO.Foto.Download", min(version, 2), "download", fields)
-        return try await Self.stillOriginal(data, filename: item.filename)
+        return (min(version, 2), fields)
+    }
+
+    func downloadVideo(_ id: String) async throws -> DownloadedMovie {
+        guard let item = items[id], item.type == "video", let route = routes["SYNO.Foto.Download"] else {
+            throw Failure(message: "This video is unavailable.")
+        }
+        let (version, fields) = downloadFields(item)
+        let params = fields.merging(["api": "SYNO.Foto.Download", "version": String(version), "method": "download", "_sid": sid]) { _, new in new }
+        let (file, response) = try await session.download(for: formRequest(route.path, params))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw ConnectionError.invalidResponse }
+        return try await Task.detached { try DownloadedMovie(download: file, filename: item.filename, unpack: true) }.value
     }
 
     nonisolated static func stillOriginal(_ data: Data, filename: String) async throws -> Data {
@@ -173,6 +201,8 @@ import ZIPFoundation
         let response = try JSONDecoder().decode(Envelope<EmptyPayload>.self, from: data)
         guard response.success else { throw ConnectionError.server(response.error?.code ?? -1) }
         items.removeValue(forKey: id)
+        videosBySize[item.filesize]?.removeAll { $0.id == item.id }
+        photosBySize[item.filesize]?.removeAll { $0.id == item.id }
     }
 
     func isStill(_ id: String) -> Bool {

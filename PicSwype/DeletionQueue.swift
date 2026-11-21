@@ -12,6 +12,7 @@ struct DeletionEntry: Identifiable, Codable {
     let id: UUID
     let origin: QueueTarget
     let name: String
+    var isVideo: Bool?
     let live: Bool
     let fileDate: Date?
     var progressKey: String?
@@ -139,7 +140,7 @@ struct DeletionEntry: Identifiable, Codable {
         let filename = asset.originalFileName ?? (library.source == .apple ? AppleOriginal.name(asset.id) : nil)
         let id = UUID()
         if let preview { _ = cacheThumbnail(preview, id: id) }
-        entries.append(.init(id: id, origin: origin, name: filename ?? "Photo", live: asset.livePhotoVideoId != nil, fileDate: date, progressKey: library.progressKey))
+        entries.append(.init(id: id, origin: origin, name: filename ?? (asset.isVideo ? "Video" : "Photo"), isVideo: asset.isVideo, live: asset.livePhotoVideoId != nil, fileDate: date, progressKey: library.progressKey))
         scheduleMatching()
     }
 
@@ -167,7 +168,7 @@ struct DeletionEntry: Identifiable, Codable {
     private func finish(_ target: QueueTarget, in model: Library, libraries: [Library]) async {
         for entry in entries where entry.remaining == [target] && entry.excluded?.contains(entry.origin) == true {
             let origin = libraries.first { $0.source.rawValue == entry.origin.source && $0.queueScope == entry.origin.scope }
-            origin?.unmark(entry.origin.id)
+            origin?.unmark(entry.origin.id, isVideo: entry.isVideo == true)
         }
         entries = entries.compactMap { entry in
             var entry = entry
@@ -184,41 +185,42 @@ struct DeletionEntry: Identifiable, Codable {
               let apple = libraries.first(where: { $0.source == .apple }) else {
             throw Failure(message: "Photo libraries are unavailable.")
         }
-        let linked = !linkedPair.isEmpty
+        let link = LibraryLink(saved: linkedPair)
+        let sources = link?.sources ?? []
+        let linked = PhotoSource(rawValue: entry.origin.source).map(sources.contains) ?? false
         status = "Checking " + entry.name + "…"
-        if linked && LinkedPhoto.identity(immich: immich, nas: nas) != linkedPair {
-            throw Failure(message: "Reconnect the linked Immich and Synology accounts to check all copies.")
+        if linked, let link, link.identity(immich: immich, nas: nas) != linkedPair {
+            throw Failure(message: "Reconnect the accounts for " + link.title + " to check all copies.")
         }
-        if linked || entry.origin.source == PhotoSource.apple.rawValue {
+        if (linked && sources.contains(.apple)) || entry.origin.source == PhotoSource.apple.rawValue {
             if !apple.connected { await apple.connect() }
             guard apple.connected else { throw Failure(message: "Allow Apple Photos access and try again.") }
         }
-        var digest: Data?
+        var fingerprint: LinkedPhoto.Fingerprint?
         var motion: Set<QueueTarget> = []
         let model = try library(for: entry.origin, in: libraries)
         var targets: Set<QueueTarget> = [entry.origin]
         if linked && !entry.live {
-            let hash = try await original(entry.origin, in: model)
-            if let hash, let remote = nas.remote {
-                digest = hash.digest
-                if model.source != .immich {
+            let hash = try await original(entry.origin, in: model, video: entry.isVideo == true)
+            if let hash {
+                fingerprint = hash
+                if sources.contains(.immich), model.source != .immich {
                     for asset in try await immichCopies(hash, filename: entry.name, client: immich) {
                         let target = QueueTarget(source: PhotoSource.immich.rawValue, scope: immich.queueScope, id: asset.id)
                         targets.insert(target)
                         if asset.livePhotoVideoId != nil { motion.insert(target) }
                     }
                 }
-                if model.source != .synology || model.folder != nil {
-                    for id in remote.possibleCopies(byteCount: hash.count, filename: entry.name, includeUnknownSizes: true) {
-                        let candidate = try await LinkedPhoto.fingerprint(remote.original(id))
+                if sources.contains(.synology), let remote = nas.remote, model.source != .synology || model.folder != nil {
+                    for id in remote.possibleCopies(byteCount: hash.count, filename: entry.name, includeUnknownSizes: true, video: hash.isVideo) {
+                        let candidate = hash.isVideo ? try await remote.downloadVideo(id).fingerprint() : try await LinkedPhoto.fingerprint(remote.original(id))
                         if candidate.digest == hash.digest { targets.insert(.init(source: PhotoSource.synology.rawValue, scope: nas.queueScope, id: id)) }
                     }
                 }
             }
         }
-        if let digest {
-            let matches = try await AppleOriginal.matches([digest])
-            for id in matches[digest, default: []] {
+        if sources.contains(.apple), let fingerprint {
+            for id in try await AppleMatchIndex.shared.matches(fingerprint) {
                 targets.insert(.init(source: PhotoSource.apple.rawValue, scope: apple.queueScope, id: id))
             }
         }
@@ -230,7 +232,7 @@ struct DeletionEntry: Identifiable, Codable {
         updated.matchVersion = 2
         updated.excluded = targets.intersection(exclusions).union(motion.subtracting(entry.uncheckedMotion ?? []))
         updated.preparedFor = linkedPair
-        updated.digest = digest
+        updated.digest = fingerprint?.digest
         entries[index] = updated
     }
 
@@ -238,13 +240,16 @@ struct DeletionEntry: Identifiable, Codable {
         guard !deleting, let i = entries.firstIndex(where: { $0.id == entryID }), let found = entries[i].found,
               entries[i].remaining == nil else { return }
         let targets = found.filter { $0.source == source }
-        for j in entries.indices where entries[j].remaining == nil {
-            let shared = targets.intersection(entries[j].found ?? [])
+        // Edit a copy so the queue is saved once, not once per row.
+        var rows = entries
+        for j in rows.indices where rows[j].remaining == nil {
+            let shared = targets.intersection(rows[j].found ?? [])
             guard !shared.isEmpty else { continue }
-            var excluded = entries[j].excluded ?? []
+            var excluded = rows[j].excluded ?? []
             if selected { excluded.subtract(shared) } else { excluded.formUnion(shared) }
-            entries[j].excluded = excluded
+            rows[j].excluded = excluded
         }
+        entries = rows
     }
 
     func deleteAll(libraries: [Library], linkedPair: String) async {
@@ -262,17 +267,20 @@ struct DeletionEntry: Identifiable, Codable {
         var completed = Set<QueueTarget>()
         do {
             guard let apple = libraries.first(where: { $0.source == .apple }) else { return }
-            for i in entries.indices where entries[i].remaining == nil {
-                let selected = (entries[i].found ?? []).subtracting(entries[i].excluded ?? [])
-                if !selected.isEmpty { entries[i].remaining = selected }
+            var rows = entries
+            for i in rows.indices where rows[i].remaining == nil {
+                let selected = (rows[i].found ?? []).subtracting(rows[i].excluded ?? [])
+                if !selected.isEmpty { rows[i].remaining = selected }
             }
+            entries = rows
             let targets = Set(entries.flatMap { $0.remaining ?? [] })
             // Resolve all accounts and recheck every matched target before any mutation.
             for target in targets {
                 let model = try library(for: target, in: libraries)
-                let expected = Set(entries.filter { $0.remaining?.contains(target) == true }.compactMap(\.digest))
+                let rows = entries.filter { $0.remaining?.contains(target) == true }
+                let expected = Set(rows.compactMap(\.digest))
                 if !expected.isEmpty {
-                    guard expected.count == 1, let actual = try await original(target, in: model), expected.contains(actual.digest) else {
+                    guard expected.count == 1, let actual = try await original(target, in: model, video: rows.contains { $0.isVideo == true }), expected.contains(actual.digest) else {
                         throw Failure(message: "A queued original changed. Remove that entry and review it again.")
                     }
                 }
@@ -285,7 +293,7 @@ struct DeletionEntry: Identifiable, Codable {
             }
             for target in targets where target.source != PhotoSource.apple.rawValue {
                 let model = try library(for: target, in: libraries)
-                status = "Moving photo to trash in " + target.source + "…"
+                status = "Moving item to trash in " + target.source + "…"
                 if model.source == .immich { try await model.trashImmich(target.id) }
                 else if let remote = model.remote { try await remote.trash(target.id) }
                 else if let folder = model.folder {
@@ -297,10 +305,12 @@ struct DeletionEntry: Identifiable, Codable {
             }
         } catch {
             // Keep choices editable when a request failed before this entry lost any copies.
-            for i in entries.indices {
-                if let old = initial.first(where: { $0.id == entries[i].id }), old.remaining == nil,
-                   (old.found ?? []).isDisjoint(with: completed) { entries[i].remaining = nil }
+            var rows = entries
+            for i in rows.indices {
+                if let old = initial.first(where: { $0.id == rows[i].id }), old.remaining == nil,
+                   (old.found ?? []).isDisjoint(with: completed) { rows[i].remaining = nil }
             }
+            entries = rows
             self.error = error.localizedDescription
         }
     }
@@ -321,14 +331,20 @@ struct DeletionEntry: Identifiable, Codable {
                 return
             }
         }
-        for i in entries.indices where entries[i].id != entry.id {
-            entries[i].excluded = (entries[i].excluded ?? []).union(protected)
-            entries[i].remaining?.subtract(protected)
+        var rows = entries
+        for i in rows.indices where rows[i].id != entry.id {
+            rows[i].excluded = (rows[i].excluded ?? []).union(protected)
+            rows[i].remaining?.subtract(protected)
         }
-        entries.removeAll { $0.id == entry.id || $0.remaining?.isEmpty == true }
+        rows.removeAll { $0.id == entry.id || $0.remaining?.isEmpty == true }
+        entries = rows
     }
 
-    private func original(_ target: QueueTarget, in model: Library) async throws -> LinkedPhoto.Fingerprint? {
+    private func original(_ target: QueueTarget, in model: Library, video: Bool) async throws -> LinkedPhoto.Fingerprint? {
+        if video && model.source != .apple {
+            guard model.folder == nil else { return nil }
+            return try await model.downloadVideo(target.id, filename: nil).fingerprint()
+        }
         switch model.source {
         case .immich: return try await LinkedPhoto.immichOriginal(target.id, model)
         case .apple: return try await AppleOriginal.fingerprint(target.id)
@@ -339,9 +355,21 @@ struct DeletionEntry: Identifiable, Codable {
     }
 
     func immichCopies(_ hash: LinkedPhoto.Fingerprint, filename: String, client: Library) async throws -> [Asset] {
+        struct Hit: Decodable {
+            struct Exif: Decodable { let fileSizeInByte: Int? }
+            let exifInfo: Exif?
+        }
         struct Search: Decodable {
             struct Page: Decodable { let items: [Asset]; let nextPage: String? }
+            struct Sizes: Decodable { let items: [Hit] }
             let assets: Page
+            let sizes: Sizes
+            enum CodingKeys: String, CodingKey { case assets }
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                assets = try container.decode(Page.self, forKey: .assets)
+                sizes = try container.decode(Sizes.self, forKey: .assets)
+            }
         }
         var verified: [Asset] = []
         var checked = Set<String>()
@@ -351,10 +379,16 @@ struct DeletionEntry: Identifiable, Codable {
                 var body: [String: Any] = filter
                 body["page"] = page
                 body["size"] = 100
+                body["withExif"] = true
                 let data = try await client.request("search/metadata", method: "POST", body: body)
-                let hits = try JSONDecoder().decode(Search.self, from: data).assets
-                for asset in hits.items where asset.type == "IMAGE" && asset.isTrashed != true && checked.insert(asset.id).inserted {
-                    if try await LinkedPhoto.immichOriginal(asset.id, client).digest == hash.digest {
+                let search = try JSONDecoder().decode(Search.self, from: data)
+                let hits = search.assets
+                // Skip downloading originals whose reported size already rules them out.
+                let sizes = Dictionary(zip(hits.items.map(\.id), search.sizes.items.map { $0.exifInfo?.fileSizeInByte }), uniquingKeysWith: { a, _ in a })
+                for asset in hits.items where asset.type == (hash.isVideo ? "VIDEO" : "IMAGE") && asset.isTrashed != true && checked.insert(asset.id).inserted {
+                    if let size = sizes[asset.id] ?? nil, size != hash.count { continue }
+                    let other = hash.isVideo ? try await client.downloadVideo(asset.id, filename: asset.originalFileName).fingerprint() : try await LinkedPhoto.immichOriginal(asset.id, client)
+                    if other.digest == hash.digest {
                         verified.append(asset)
                     }
                 }
@@ -376,7 +410,7 @@ enum AppleOriginal {
     static func fingerprint(_ id: String) async throws -> LinkedPhoto.Fingerprint? {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else { throw Failure(message: "An Apple photo is no longer accessible.") }
         let resources = PHAssetResource.assetResources(for: asset)
-        guard resources.count == 1, let resource = resources.first, resource.type == .photo else { return nil }
+        guard resources.count == 1, let resource = resources.first, resource.type == .photo || resource.type == .video else { return nil }
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
         return try await withCheckedThrowingContinuation { continuation in
@@ -385,33 +419,11 @@ enum AppleOriginal {
                 sha.update(data: chunk); search.update(data: chunk); count += chunk.count
             } completionHandler: { error in
                 if let error { continuation.resume(throwing: error) }
-                else { continuation.resume(returning: LinkedPhoto.Fingerprint(digest: Data(sha.finalize()), searchChecksum: Data(search.finalize()).base64EncodedString(), count: count)) }
+                else { continuation.resume(returning: LinkedPhoto.Fingerprint(digest: Data(sha.finalize()), searchChecksum: Data(search.finalize()).base64EncodedString(), count: count, dimensions: .init(resource.pixelWidth, resource.pixelHeight), isVideo: resource.type == .video, taken: asset.creationDate, takenIsExact: true)) }
             }
         }
     }
-    private struct CachedOriginal {
-        let modified: Date
-        let digest: Data?
-    }
-    @MainActor private static var cache: [String: CachedOriginal] = [:]
-    @MainActor static func matches(_ wanted: Set<Data>) async throws -> [Data: [String]] {
-        var result: [Data: [String]] = [:]
-        let assets = PHAsset.fetchAssets(with: .image, options: nil)
-        for i in 0..<assets.count {
-            try Task.checkCancellation()
-            let asset = assets.object(at: i)
-            let id = asset.localIdentifier
-            let digest: Data?
-            if let cached = cache[id], cached.modified == asset.modificationDate {
-                digest = cached.digest
-            } else {
-                digest = try await fingerprint(id)?.digest
-                if let modified = asset.modificationDate { cache[id] = CachedOriginal(modified: modified, digest: digest) }
-            }
-            if let digest, wanted.contains(digest) { result[digest, default: []].append(id) }
-        }
-        return result
-    }
+
 }
 
 struct DeletionQueueView: View {
@@ -431,7 +443,7 @@ struct DeletionQueueView: View {
                             .swipeActions { Button("Keep") { queue.keep(entry, libraries: libraries) }.tint(.green).disabled(queue.deleting) }
                         }
                     } footer: {
-                        Text(linkedPair.isEmpty ? "Library linking is off. Choose “Link all three libraries” in settings to check for copies." : "Choose the libraries to delete from. Live Photo matches with unverified motion start unselected.")
+                        Text(linkedPair.isEmpty ? "Library linking is off. Turn on “Link libraries” in Settings to check for copies." : "Choose the libraries to delete from. Live Photo matches with unverified motion start unselected.")
                     }
                 }
             }
@@ -443,7 +455,7 @@ struct DeletionQueueView: View {
                     else if queue.entries.contains(where: { $0.needsMatching(linkedPair) }) {
                         if queue.entries.contains(where: { queue.matchFailures[$0.id] != nil }) {
                             Button("Retry matching") { queue.retryMatching() }
-                        } else { ProgressView("Waiting to check photos…") }
+                        } else { ProgressView("Waiting to check items…") }
                     } else { Button("Delete All", role: .destructive) { Task { await queue.deleteAll(libraries: libraries, linkedPair: linkedPair) } }.disabled(!queue.entries.contains { !($0.remaining ?? ($0.found ?? []).subtracting($0.excluded ?? [])).isEmpty }) }
                     }
                     .buttonStyle(.borderedProminent)
@@ -474,9 +486,15 @@ private struct QueuePhotoRow: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 8).fill(.quaternary)
                 if let image { Image(uiImage: image).resizable().scaledToFill() }
-                else { Image(systemName: "photo").foregroundStyle(.secondary) }
+                else { Image(systemName: entry.isVideo == true ? "video" : "photo").foregroundStyle(.secondary) }
             }
             .frame(width: 56, height: 56)
+            .overlay(alignment: .bottomTrailing) {
+                if entry.isVideo == true {
+                    Image(systemName: "play.fill").font(.caption2)
+                        .foregroundStyle(.white).padding(4).background(.black.opacity(0.7), in: Circle()).padding(3)
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .accessibilityHidden(true)
 
@@ -486,6 +504,11 @@ private struct QueuePhotoRow: View {
                     Text("Pending: " + Set(remaining.map(\.source)).sorted().joined(separator: ", "))
                         .font(.caption).foregroundStyle(.secondary)
                 } else if let found = entry.found, !entry.needsMatching(linkedPair) {
+                    if entry.digest == nil, found == [entry.origin],
+                       LibraryLink(saved: linkedPair)?.sources.contains(where: { $0.rawValue == entry.origin.source }) == true {
+                        Text("Other libraries can’t be checked for copies of this item (edited, Live Photo, or unsupported file).")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                     if entry.uncheckedMotion?.isEmpty == false {
                         Text("Immich still matches · motion unverified").font(.caption2).foregroundStyle(.secondary)
                     }
@@ -511,7 +534,7 @@ private struct QueuePhotoRow: View {
             .fixedSize()
             .buttonStyle(.plain)
             .foregroundStyle(.green)
-            .accessibilityHint("Remove this photo from the deletion queue")
+            .accessibilityHint("Remove this item from the deletion queue")
             .disabled(queue.deleting)
         }
         .task(id: entry.id) { image = await queue.thumbnail(entry, libraries: libraries) }

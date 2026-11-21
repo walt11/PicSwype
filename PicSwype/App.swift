@@ -1,4 +1,5 @@
 import SwiftUI
+import Photos
 import Security
 import UniformTypeIdentifiers
 
@@ -9,6 +10,7 @@ struct Asset: Codable, Identifiable {
     var originalFileName: String?
     var localDateTime: String?
     var livePhotoVideoId: String?
+    var isVideo: Bool { type == "VIDEO" }
 }
 struct Failure: LocalizedError { let message: String; var errorDescription: String? { message } }
 enum Secret {
@@ -83,8 +85,21 @@ enum Secret {
         }
     }
     private(set) var authenticatedImmich: (server: String, key: String)?
+    var isConfigured: Bool {
+        switch source {
+        case .apple: return true
+        case .immich: return connected || (!(UserDefaults.standard.string(forKey: "server") ?? "").isEmpty && !Secret.read().isEmpty)
+        case .synology:
+            if UserDefaults.standard.bool(forKey: "PicSwype.directNAS") { return savedNAS != nil }
+            return folder != nil || UserDefaults.standard.data(forKey: "PicSwype.NASFolder") != nil
+        }
+    }
+
     private let httpSession: URLSession
-    init(_ source: PhotoSource, session: URLSession = .shared, remote: SynologyPhotos? = nil) {
+    private let saveImmichKey: (String) throws -> Void
+    init(_ source: PhotoSource, session: URLSession = .shared, remote: SynologyPhotos? = nil,
+         saveImmichKey: @escaping (String) throws -> Void = { try Secret.save($0) }) {
+        self.saveImmichKey = saveImmichKey
         self.remote = remote
         self.source = source
         self.httpSession = session
@@ -126,7 +141,7 @@ enum Secret {
         guard let url = URL(string:server + "/api/" + path), ["http","https"].contains(url.scheme ?? ""), url.host != nil else { throw Failure(message:"Enter a valid http or https server address.") }
         var r = URLRequest(url:url); r.httpMethod = method; r.setValue(key,forHTTPHeaderField:"x-api-key"); r.timeoutInterval = 30
         if let body { r.httpBody = try JSONSerialization.data(withJSONObject:body); r.setValue("application/json",forHTTPHeaderField:"Content-Type") }
-        let (data,response) = try await httpSession.data(for:r)
+        let (data,response) = try await Self.load { try await httpSession.data(for:r) }
         guard let http = response as? HTTPURLResponse else { throw Failure(message: "Invalid server response.") }
         guard (200...299).contains(http.statusCode) else {
             throw Failure(message: "The server returned HTTP \(http.statusCode) for \(method) /api/\(path).")
@@ -136,6 +151,50 @@ enum Secret {
         }
         return data
     }
+    func downloadVideo(_ id: String, filename: String?) async throws -> DownloadedMovie {
+        if let remote { return try await remote.downloadVideo(id) }
+        guard source == .immich, UUID(uuidString: id) != nil,
+              let url = URL(string: server + "/api/assets/" + id + "/original") else {
+            throw Failure(message: "Invalid video identifier.")
+        }
+        var request = URLRequest(url: url)
+        request.setValue(key, forHTTPHeaderField: "x-api-key")
+        let (file, response) = try await Self.load { try await httpSession.download(for: request) }
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+              http.mimeType != "text/html" else { throw Failure(message: "Immich could not download the video.") }
+        return try DownloadedMovie(download: file, filename: filename ?? response.suggestedFilename ?? "video.mov")
+    }
+
+    /// Plain-HTTP servers are only allowed on the local network; explain the block instead of showing a raw URL error.
+    nonisolated static func load<T>(_ operation: () async throws -> T) async throws -> T {
+        do { return try await operation() }
+        catch let error as URLError where error.code == .appTransportSecurityRequiresSecureConnection {
+            throw Failure(message: "Use an https address for servers outside your local network.")
+        }
+    }
+
+    /// Streams with the API key header instead of downloading the whole original before playback.
+    func immichPlaybackURL(_ id: String) -> URL? {
+        guard source == .immich, UUID(uuidString: id) != nil else { return nil }
+        return URL(string: server + "/api/assets/" + id + "/video/playback")
+    }
+
+    private var sweepPage = 1
+    /// Random batches rarely surface the last unreviewed items, so walk the library in pages once they run dry.
+    private func sweepImmich() async throws {
+        struct Search: Decodable {
+            struct Page: Decodable { let items: [Asset]; let nextPage: String? }
+            let assets: Page
+        }
+        for _ in 0..<20 where assets.isEmpty {
+            let data = try await request("search/metadata", method: "POST", body: ["page": sweepPage, "size": 250])
+            let page = try JSONDecoder().decode(Search.self, from: data).assets
+            appendUnreviewed(page.items)
+            if let next = page.nextPage.flatMap(Int.init), next > sweepPage { sweepPage = next }
+            else { sweepPage = 1; break }
+        }
+    }
+
     private func randomPhotos(size: Int) async throws -> [Asset] {
         if source != .immich {
             let amount = min(size, catalogue.count)
@@ -143,9 +202,32 @@ enum Secret {
             catalogue.removeLast(amount)
             return batch
         }
-        let data = try await request("search/random", method: "POST", body: ["size": size, "type": "IMAGE"])
+        let data = try await request("search/random", method: "POST", body: ["size": size])
         return try JSONDecoder().decode([Asset].self, from: data)
     }
+    func restoreConnection(requestPhotosAccess: Bool = false) async {
+        guard !connected, !busy else { return }
+        switch source {
+        case .apple:
+            let access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            if requestPhotosAccess || access == .authorized || access == .limited { await connect() }
+        case .immich:
+            if !server.isEmpty && !key.isEmpty { await connect() }
+        case .synology:
+            if UserDefaults.standard.bool(forKey: "PicSwype.directNAS") {
+                if let saved = savedNAS {
+                    await signInNAS(address: saved.address, username: saved.username, password: "", otp: "", saved: saved)
+                }
+            } else if let bookmark = UserDefaults.standard.data(forKey: "PicSwype.NASFolder") {
+                var stale = false
+                if let url = try? URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale) {
+                    selectFolder(url)
+                    await connect()
+                }
+            }
+        }
+    }
+
     func connect() async {
         guard !busy else { return }
         lastReview = nil
@@ -172,17 +254,17 @@ enum Secret {
                 guard !key.isEmpty else { throw Failure(message:"Enter your Immich API key.") }
                 _ = try await randomPhotos(size: 1)
                 authenticatedImmich = (server, key)
-                try Secret.save(key); UserDefaults.standard.set(server,forKey:"server")
+                try saveImmichKey(key); UserDefaults.standard.set(server,forKey:"server")
             }
             // Progress is scoped to the server; credentials stay in Keychain.
-            seen = Set(UserDefaults.standard.stringArray(forKey:progressKey + ".seen") ?? [])
+            seen = SeenStore.load(progressKey)
             kept = UserDefaults.standard.integer(forKey:progressKey + ".kept")
             trashed = UserDefaults.standard.integer(forKey:progressKey + ".trashed")
             marked = Set(UserDefaults.standard.stringArray(forKey: progressKey + ".marked") ?? [])
             if source != .immich {
                 for asset in catalogue where marked.contains(asset.id) { DeletionQueue.shared.add(asset, from: self) }
                 catalogue.removeAll { seen.contains($0.id) || marked.contains($0.id) }
-                saveProgress()
+                saveCounts()
             }
             connected = true
             try await refill()
@@ -199,7 +281,7 @@ enum Secret {
     private func appendUnreviewed(_ batch: [Asset]) {
         var ids = seen.union(marked).union(assets.map(\.id))
         assets.append(contentsOf: batch.filter {
-            $0.type == "IMAGE" && $0.isTrashed != true && ids.insert($0.id).inserted
+            ($0.type == "IMAGE" || $0.isVideo) && $0.isTrashed != true && ids.insert($0.id).inserted
         })
     }
 
@@ -221,7 +303,12 @@ enum Secret {
     private func queuePreviews() {
         for asset in assets.prefix(4) where previews[asset.id] == nil {
             previews[asset.id] = Task {
-                let image = try await preview(for: asset.id)
+                let image: UIImage
+                do { image = try await preview(for: asset.id) }
+                catch {
+                    guard asset.isVideo, let poster = UIImage(systemName: "film", withConfiguration: UIImage.SymbolConfiguration(pointSize: 96)) else { throw error }
+                    image = poster
+                }
                 try Task.checkCancellation()
                 readyPreviews[asset.id] = image
                 return image
@@ -231,32 +318,42 @@ enum Secret {
 
     func refill() async throws {
         picture = nil
-        if assets.isEmpty {
-            await nextBatch?.value
-            for _ in 0..<5 where assets.isEmpty {
-                let batch = try await randomPhotos(size: 100)
-                appendUnreviewed(batch)
-                if batch.isEmpty { break }
-            }
-        }
-        guard let asset = assets.first else { return }
-        queuePreviews()
-        if assets.count <= 10, nextBatch == nil {
-            nextBatch = Task {
-                let batch = try? await randomPhotos(size: 100)
-                guard !Task.isCancelled else { return }
-                if let batch {
+        var failures = 0
+        while true {
+            if assets.isEmpty {
+                await nextBatch?.value
+                for _ in 0..<5 where assets.isEmpty {
+                    let batch = try await randomPhotos(size: 100)
                     appendUnreviewed(batch)
-                    queuePreviews()
+                    if batch.isEmpty { break }
                 }
-                nextBatch = nil
+                if assets.isEmpty, source == .immich { try await sweepImmich() }
             }
-        }
-        do {
-            picture = try await previews[asset.id]?.value
-        } catch {
-            previews.removeValue(forKey: asset.id)
-            throw error
+            guard let asset = assets.first else { return }
+            queuePreviews()
+            if assets.count <= 10, nextBatch == nil {
+                nextBatch = Task {
+                    let batch = try? await randomPhotos(size: 100)
+                    guard !Task.isCancelled else { return }
+                    if let batch {
+                        appendUnreviewed(batch)
+                        queuePreviews()
+                    }
+                    nextBatch = nil
+                }
+            }
+            do {
+                picture = try await previews[asset.id]?.value
+                return
+            } catch {
+                previews.removeValue(forKey: asset.id)
+                failures += 1
+                guard failures < 3, assets.first?.id == asset.id else { throw error }
+                // Move past an item that won't load without marking it reviewed; it comes back on a later pass.
+                assets.removeFirst()
+                readyPreviews.removeValue(forKey: asset.id)
+                if source != .immich { catalogue.insert(asset, at: 0) }
+            }
         }
     }
     func act(delete: Bool) async {
@@ -270,9 +367,10 @@ enum Secret {
             previousDecisionWasTrash = nil
             lastReview = LastReview(asset: asset, image: image, trashed: delete, scope: scope)
             seen.insert(asset.id); assets.removeFirst()
+            SeenStore.append(asset.id, progressKey)
             previews.removeValue(forKey: asset.id)
             readyPreviews.removeValue(forKey: asset.id)
-            saveProgress()
+            saveCounts()
             try await refill()
         } catch { self.error = error.localizedDescription }
     }
@@ -283,7 +381,7 @@ enum Secret {
 
     func recordLinkedTrash(_ id: String) async {
         let wasCurrent = assets.first?.id == id
-        seen.insert(id)
+        if seen.insert(id).inserted { SeenStore.append(id, progressKey) }
         marked.remove(id)
         catalogue.removeAll { $0.id == id }
         assets.removeAll { $0.id == id }
@@ -292,15 +390,14 @@ enum Secret {
         lastReview = nil
         previousDecisionWasTrash = nil
         trashed += 1
-        saveProgress()
+        saveCounts()
         if wasCurrent {
             do { try await refill() } catch { self.error = error.localizedDescription }
         }
     }
 
-    private func saveProgress() {
+    private func saveCounts() {
         UserDefaults.standard.set(Array(marked), forKey: progressKey + ".marked")
-        UserDefaults.standard.set(Array(seen), forKey: progressKey + ".seen")
         UserDefaults.standard.set(kept, forKey: progressKey + ".kept")
         UserDefaults.standard.set(trashed, forKey: progressKey + ".trashed")
     }
@@ -318,42 +415,40 @@ enum Secret {
         assets.insert(review.asset, at: 0)
         picture = review.image
         previousDecisionWasTrash = review.trashed
-        seen.remove(review.asset.id)
+        if seen.remove(review.asset.id) != nil { SeenStore.write(seen, progressKey) }
         lastReview = nil
-        saveProgress()
+        saveCounts()
     }
 
     func keepQueued(_ id: String) {
         marked.remove(id)
-        seen.insert(id)
+        if seen.insert(id).inserted { SeenStore.append(id, progressKey) }
         kept += 1
         if lastReview?.asset.id == id { lastReview = nil }
-        saveProgress()
+        saveCounts()
     }
 
     static func keepOffline(_ id: String, progressKey: String) {
         let defaults = UserDefaults.standard
         var marked = Set(defaults.stringArray(forKey: progressKey + ".marked") ?? [])
-        var seen = Set(defaults.stringArray(forKey: progressKey + ".seen") ?? [])
         marked.remove(id)
-        seen.insert(id)
         defaults.set(Array(marked), forKey: progressKey + ".marked")
-        defaults.set(Array(seen), forKey: progressKey + ".seen")
+        if !SeenStore.load(progressKey).contains(id) { SeenStore.append(id, progressKey) }
         defaults.set(defaults.integer(forKey: progressKey + ".kept") + 1, forKey: progressKey + ".kept")
     }
 
-    func unmark(_ id: String) {
+    func unmark(_ id: String, isVideo: Bool = false) {
         guard !busy, marked.remove(id) != nil else { return }
         _ = DeletionQueue.shared.removeUnstarted(id: id, library: self)
-        seen.remove(id)
+        if seen.remove(id) != nil { SeenStore.write(seen, progressKey) }
         if lastReview?.asset.id == id { lastReview = nil }
-        catalogue.append(Asset(id: id, type: "IMAGE", originalFileName: source == .synology ? (remote?.name(id) ?? URL(fileURLWithPath: id).lastPathComponent) : nil))
-        saveProgress()
+        catalogue.append(Asset(id: id, type: isVideo ? "VIDEO" : "IMAGE", originalFileName: source == .synology ? (remote?.name(id) ?? URL(fileURLWithPath: id).lastPathComponent) : nil))
+        saveCounts()
     }
 
     func reload(reset: Bool = false) async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        if reset { lastReview = nil; previousDecisionWasTrash = nil; clearQueue(); seen = []; assets = []; UserDefaults.standard.removeObject(forKey:progressKey + ".seen") }
+        if reset { lastReview = nil; previousDecisionWasTrash = nil; clearQueue(); seen = []; assets = []; sweepPage = 1; SeenStore.remove(progressKey) }
         if reset && source != .immich {
             busy = false
             await connect()
@@ -368,51 +463,56 @@ struct ContentView: View {
     @StateObject private var apple = Library(.apple)
     @StateObject private var nas = Library(.synology)
     @AppStorage("PicSwype.linkedPair") private var linkedPair = ""
-    @AppStorage("PicSwype.source") private var source = PhotoSource.immich
+    @AppStorage("PicSwype.source") private var source = PhotoSource.apple
     var body: some View {
         let active = source == .immich ? immich : (source == .apple ? apple : nas)
         ReviewView(library: active, immich: immich, nas: nas, apple: apple, source: $source).id(source)
             .onChange(of: [linkedPair] + [immich, nas, apple].map { $0.connected ? $0.queueScope : "" }, initial: true) {
                 DeletionQueue.shared.configureMatching(libraries: [immich, nas, apple], linkedPair: linkedPair)
             }
-            .task(id: source) {
-                guard !(UserDefaults.standard.string(forKey: "PicSwype.linkedPair") ?? "").isEmpty else { return }
-                if source != .synology, !nas.connected, let saved = nas.savedNAS,
-                   UserDefaults.standard.bool(forKey: "PicSwype.directNAS") {
-                    await nas.signInNAS(address: saved.address, username: saved.username, password: "", otp: "", saved: saved)
-                }
-                if source != .immich, !immich.connected, !immich.server.isEmpty, !immich.key.isEmpty {
-                    await immich.connect()
+            .task(id: apple.connected && LibraryLink(saved: linkedPair)?.sources.contains(.apple) == true, priority: .utility) {
+                if apple.connected, LibraryLink(saved: linkedPair)?.sources.contains(.apple) == true {
+                    await AppleMatchIndex.shared.prepare()
                 }
             }
+            .task { await apple.restoreConnection(requestPhotosAccess: source == .apple) }
+            .task { await immich.restoreConnection() }
+            .task { await nas.restoreConnection() }
     }
 }
 
 struct ReviewView: View {
     @ObservedObject var library: Library
-    let immich: Library
-    let nas: Library
-    let apple: Library
+    @ObservedObject var immich: Library
+    @ObservedObject var nas: Library
+    @ObservedObject var apple: Library
     @ObservedObject private var deletionQueue = DeletionQueue.shared
-    @State private var showAbout = false
     @State private var showQueue = false
     @Binding var source: PhotoSource
     @AppStorage("PicSwype.linkedPair") private var linkedPair = ""
     @AppStorage("PicSwype.pendingLinkedTrash") private var pendingData = Data()
     private var pair: String? { LinkedPhoto.identity(immich: immich, nas: nas) }
-    @State private var choosingFolder = false
+    private var reviewSources: [PhotoSource] {
+        [apple, immich, nas].filter(\.connected).map(\.source)
+    }
 
+    private var canSwitchLibrary: Bool { reviewSources.contains { $0 != source } }
 
-    @State private var nasAddress = ""
-    @State private var nasUser = ""
-    @State private var nasPassword = ""
-    @State private var nasOTP = ""
-    private var sourceMenu: some View {
-        Menu {
-            Picker("Library", selection: $source) {
-                ForEach(PhotoSource.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-        } label: {
+    @ViewBuilder private var sourceMenu: some View {
+        if canSwitchLibrary {
+            Menu {
+                ForEach(reviewSources, id: \.self) { option in
+                    Button { source = option } label: {
+                        if source == option { Label(option.rawValue, systemImage: "checkmark") }
+                        else { Text(option.rawValue) }
+                    }
+                }
+            } label: { titleLabel }
+            .accessibilityLabel("Library, " + source.rawValue)
+        } else { titleLabel }
+    }
+
+    private var titleLabel: some View {
             HStack(spacing: 7) {
                 Image(decorative: "ToolbarIcon")
                     .resizable()
@@ -422,7 +522,7 @@ struct ReviewView: View {
                     Text("PicSwype").font(.system(size: 25, weight: .bold))
                     HStack(spacing: 4) {
                         Text(source.rawValue)
-                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                        if canSwitchLibrary { Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)) }
                     }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -432,9 +532,7 @@ struct ReviewView: View {
             .padding(.horizontal, 8)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
-        }
-        .accessibilityLabel("Library, " + source.rawValue)
-        .accessibilityHint("Choose a photo library")
+
     }
 
     @State private var offset: CGFloat = 0
@@ -446,12 +544,11 @@ struct ReviewView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var settings = false
     @State private var zoom = false
-    @State private var reset = false
     @Environment(\.openURL) private var openURL
 
     private var openPhotoTitle: String {
         switch source {
-        case .apple: return "Photo Details"
+        case .apple: return library.assets.first?.isVideo == true ? "Video Details" : "Photo Details"
         case .synology: return "Open Synology Photos library"
         case .immich: return "Open in Immich"
         }
@@ -531,7 +628,7 @@ struct ReviewView: View {
 
     private func photoCard<Photo: View>(underneath: Bool, @ViewBuilder photo: () -> Photo) -> some View {
         VStack(spacing: 6) {
-            Text(library.assets.first?.originalFileName ?? "Photo")
+            Text(library.assets.first?.originalFileName ?? (library.assets.first?.isVideo == true ? "Video" : "Photo"))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -550,49 +647,29 @@ struct ReviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    var setup: some View {
-        Form {
-            if source == .apple {
-                Button("Connect to Apple Photos") { Task { await library.connect() } }
-                Text("Swipe left to queue photos, then review them together.").font(.footnote)
-            } else if source == .synology {
-                Section("Synology Photos · Personal Space") {
-                    TextField("DSM URL or QuickConnect ID", text: $nasAddress)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("DSM username", text: $nasUser)
-                        .textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Password", text: $nasPassword).textContentType(.password)
-                    TextField("Verification code (if required)", text: $nasOTP).textContentType(.oneTimeCode)
-                    Button("Connect to Synology Photos") {
-                        Task {
-                            await library.signInNAS(address: nasAddress.trimmingCharacters(in: .whitespacesAndNewlines),
-                                username: nasUser, password: nasPassword, otp: nasOTP)
-                            if library.error == nil && library.connected { nasPassword = ""; nasOTP = ""; settings = false }
-                        }
-                    }.disabled(nasAddress.isEmpty || nasUser.isEmpty || nasPassword.isEmpty)
-                    if library.busy { ProgressView("Connecting…") }
-                }
-                Button("Choose a folder in Files instead") { settings = false; choosingFolder = true }
-            } else {
-            Section("Your photo library") {
-                TextField("https://immich.example.com",text:$library.server).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                SecureField("Immich API key",text:$library.key)
-                Text("Create an API key in Immich account settings with permission to read photos and move assets to trash.").font(.footnote).foregroundStyle(.secondary)
-            }
-            Button("Connect to Immich") { Task { await library.connect(); if library.connected { settings = false } } }.disabled(library.busy)
+    private var settingsButton: some View {
+        Button { settings = true } label: { Label("Settings", systemImage: "gearshape") }
+    }
+
+    private var setup: some View {
+        VStack(spacing: 12) {
             if library.busy { ProgressView() }
-            Section { Text("Swipe left to queue a photo for deletion. Review the queue before deleting.") }
-            }
-            if !settings { Button("About PicSwype") { showAbout = true } }
-        }.disabled(library.busy).navigationTitle("Connect")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if !settings {
-                ToolbarItem(placement: .topBarTrailing) { Button { showQueue = true } label: { Image(systemName: "tray.full") }.accessibilityLabel("Deletion queue") }
-                ToolbarItem(placement: .principal) { sourceMenu.disabled(library.busy) }
+            else {
+                Image(systemName: "photo.on.rectangle").font(.largeTitle)
+                Text(source.rawValue).font(.title2.bold())
+                if source == .apple {
+                    Button("Allow Photos access") { Task { await apple.connect() } }
+                    Link("Open iOS Settings", destination: URL(string: UIApplication.openSettingsURLString)!)
+                } else { Button("Manage connection") { settings = true } }
             }
         }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) { sourceMenu }
+            ToolbarItem(placement: .topBarTrailing) { settingsButton }
+        }
     }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -614,6 +691,8 @@ struct ReviewView: View {
                                 }
                                 photoCard(underneath: false) {
                                     fittedPhoto(image)
+                                    .overlay { if library.assets.first?.isVideo == true { Image(systemName: "play.circle.fill").font(.system(size: 52)).foregroundStyle(.white).shadow(radius: 4).allowsHitTesting(false) } }
+                                    .accessibilityLabel(library.assets.first?.isVideo == true ? "Play video" : "View photo")
                                     .onTapGesture { if !transitioning { zoom = true } }
                                     .overlay(alignment: offset >= 0 ? .topLeading : .topTrailing) {
                                         Label(offset >= 0 ? "Keep" : "Queue",
@@ -645,8 +724,17 @@ struct ReviewView: View {
                                     })
 
                                 }
-                            } else if library.busy { ProgressView("Loading photo…") }
-                            else { ContentUnavailableView("No new photos found",systemImage:"photo.stack",description:Text(source == .immich ? "Checking again automatically." : "Refresh the library to check for more photos.")) }
+                            } else if library.busy { ProgressView("Loading preview…") }
+                            else if !library.assets.isEmpty {
+                                ContentUnavailableView {
+                                    Label("Couldn’t load this item", systemImage: "exclamationmark.triangle")
+                                } description: {
+                                    Text("Check your connection, then try again.")
+                                } actions: {
+                                    Button("Try Again") { Task { await library.reload() } }
+                                }
+                            }
+                            else { ContentUnavailableView("No new photos or videos",systemImage:"photo.stack",description:Text(source == .immich ? "Checking again automatically." : "Refresh the library to check for more photos and videos.")) }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                         if let wasTrashed = library.previousDecisionWasTrash {
                             Label(wasTrashed ? "Previously queued" : "Previously kept",
@@ -691,40 +779,9 @@ struct ReviewView: View {
                             .accessibilityLabel("Undo last review")
                             .disabled(transitioning || library.busy || !library.canGoBack)
                         }
-                        ToolbarItem(placement:.topBarTrailing) { Menu {
-                            Button("About PicSwype") { showAbout = true }
-                            Button("Deletion queue") { showQueue = true }
-                            Group {
-                                Button(!linkedPair.isEmpty ? "Unlink libraries" : "Link all three libraries") {
-                                    if !linkedPair.isEmpty { linkedPair = "" }
-                                    else if !pendingData.isEmpty { library.error = "Reconnect the previously linked accounts to finish their pending trash request." }
-                                    else if let pair { linkedPair = pair }
-                                    else { library.error = "Open each library and connect Immich and Synology Photos by URL or QuickConnect first." }
-                                }
-                            }
-                            if source == .immich { Button("Connection settings") { settings = true } } else { Button("Refresh library") { Task { await library.connect() } }; if source == .synology { Button("Connection settings") { settings = true }; Button("Choose folder") { choosingFolder = true } } }; Button("Restart review") { reset = true } } label: { Image(systemName:"gearshape") }.disabled(transitioning || library.busy) }
+                        ToolbarItem(placement: .topBarTrailing) { settingsButton.disabled(transitioning) }
                     }
                 }
-            }
-        }
-        .task {
-            if source == .synology, let saved = library.savedNAS {
-                nasAddress = saved.address
-                nasUser = saved.username
-                if !library.connected && UserDefaults.standard.bool(forKey: "PicSwype.directNAS") {
-                    await library.signInNAS(address: saved.address, username: saved.username, password: "", otp: "", saved: saved)
-                    return
-                }
-            }
-            guard !library.connected else { return }
-            if source == .synology, let bookmark = UserDefaults.standard.data(forKey: "PicSwype.NASFolder") {
-                var stale = false
-                if let url = try? URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale) {
-                    library.selectFolder(url)
-                    await library.connect()
-                }
-            } else if source == .apple || (source == .immich && !library.server.isEmpty && !library.key.isEmpty) {
-                await library.connect()
             }
         }
         .task(id: pair) {
@@ -733,22 +790,14 @@ struct ReviewView: View {
                 pendingData = Data()
             }
         }
-        .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
-            do {
-                let url = try result.get()
-                library.selectFolder(url)
-                let data = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
-                UserDefaults.standard.set(data, forKey: "PicSwype.NASFolder")
-                Task { await library.connect() }
-            } catch { library.error = error.localizedDescription }
-        }
-        .sheet(isPresented: $showAbout) { AboutView() }
         .sheet(isPresented: $showQueue) {
             DeletionQueueView(queue: deletionQueue, libraries: [immich, nas, apple], linkedPair: linkedPair)
         }
-        .sheet(isPresented:$settings) { NavigationStack { setup.toolbar { Button("Done") { settings = false } } } }
-        .sheet(isPresented:$zoom) { if let image = library.picture { NavigationStack { ScrollView([.horizontal,.vertical]) { Image(uiImage:image) }.toolbar { ToolbarItem(placement: .topBarLeading) { openPhotoButton }; ToolbarItem(placement: .confirmationAction) { Button("Done") { zoom = false } } } } } }
-        .confirmationDialog("Review previously seen photos again?",isPresented:$reset) { Button("Restart review") { Task { await library.reload(reset:true) } } }
+        .sheet(isPresented: $settings) {
+            LibrarySettings(apple: apple, immich: immich, nas: nas, linkedPair: $linkedPair,
+                            pendingReceipt: !pendingData.isEmpty, active: library)
+        }
+        .sheet(isPresented:$zoom) { if let asset = library.assets.first, asset.isVideo { VideoReview(asset: asset, library: library) } else if let image = library.picture { NavigationStack { ScrollView([.horizontal,.vertical]) { Image(uiImage:image) }.toolbar { ToolbarItem(placement: .topBarLeading) { openPhotoButton }; ToolbarItem(placement: .confirmationAction) { Button("Done") { zoom = false } } } } } }
         .alert("Unable to complete request",isPresented:Binding(get:{library.error != nil},set:{if !$0 {library.error = nil}})) { Button("OK") {library.error = nil} } message: { Text(library.error ?? "") }
     }
 }

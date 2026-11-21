@@ -7,17 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A64DF31BC8239691C86715E /* AppleMatchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA50E3D06D910165C3113B2 /* AppleMatchIndex.swift */; };
 		13B99D7B2DEE30B4AAB03B3F /* SynologyConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F43670F9C5579A1CCCE497D /* SynologyConnection.swift */; };
-		1ADCE014295BC7BCE364A253 /* MatchQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7723FEF25427D50216EC6AC8 /* MatchQueue.swift */; };
+		1ADC60130C38E4B1D0B4986C /* LibrarySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84CD75A01D239CECEA007285 /* LibrarySettings.swift */; };
 		1C0C3F20A0A90A43B7A9C2FE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97F5FBBA1D6CA475FB910540 /* Assets.xcassets */; };
 		22C52E851A20B60496D4A055 /* SynologyPhotos.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1F811A3C700E83E3AA26E6 /* SynologyPhotos.swift */; };
 		435DEB3CA6EAE42BF1F20022 /* SynologyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B39FEC3DEA055BC1E2685E2 /* SynologyTests.swift */; };
 		5380738F9D102677B85CE0CD /* DeletionQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 005FFAEA2FA36CAF464E51D0 /* DeletionQueueTests.swift */; };
 		64EA558A7CD40E0BB0107E7C /* ApplePhotoDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF6144FE080D39467DB826AF /* ApplePhotoDetails.swift */; };
 		695DE0BB92BD700F1B4186E9 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF398F3B7145BA1216B4D793 /* App.swift */; };
+		6AF756DC794426C61291E839 /* ReviewClip.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 5531800E498596FA3A6AD89E /* ReviewClip.mp4 */; };
 		749363A12A786C68033323AC /* LibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 856249B1863023534C16442A /* LibraryTests.swift */; };
 		78ECD3317807E5B41C960B52 /* DeletionQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F371A80E46CA556B6F3AC9E /* DeletionQueue.swift */; };
-		7A02ACC0D1F7D47E874AD843 /* MatchQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AE910698E12B821BCE9AB25 /* MatchQueueTests.swift */; };
 		7C8FC16A8733A47006288D71 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 504FC21468920C914FD27E93 /* LICENSE */; };
 		8B194F62A01A5597AA111153 /* LinkedPhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE0D5C14776BBC42FE4362D /* LinkedPhoto.swift */; };
 		8D8CB0BF07A889475C1618E1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 30012D856A05AD04E3B50B97 /* PrivacyInfo.xcprivacy */; };
@@ -25,6 +26,8 @@
 		A2CAD01F7048F500686BB49B /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CCBD0065F7B45F6F9FAAE76 /* AboutView.swift */; };
 		BC4F11369B18CB8E1AAE33BB /* LivePair.zip in Resources */ = {isa = PBXBuildFile; fileRef = D0F03D76CE1FB6D0D4690CA9 /* LivePair.zip */; };
 		D15B60D64DC05327F20B8FBC /* LinkedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74C8681D5928D1564FA5AF9E /* LinkedTests.swift */; };
+		D719EB3B01327F91FD806A2A /* VideoReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A049D653A5FD6DD7B985D4 /* VideoReview.swift */; };
+		DD1418BF00B2CD6D9BC90E94 /* SeenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC89CFA088401FACD24B8CCE /* SeenStore.swift */; };
 		E021289D123F48DB211396ED /* PhotoSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEED4F0A405626E6ABB45BD3 /* PhotoSources.swift */; };
 		F9001DDAC3D0965FE5C254DD /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = D330B1D23AC325EA635E478D /* ZIPFoundation */; };
 /* End PBXBuildFile section */
@@ -43,8 +46,9 @@
 		005FFAEA2FA36CAF464E51D0 /* DeletionQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionQueueTests.swift; sourceTree = "<group>"; };
 		2B39FEC3DEA055BC1E2685E2 /* SynologyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynologyTests.swift; sourceTree = "<group>"; };
 		30012D856A05AD04E3B50B97 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		4DA50E3D06D910165C3113B2 /* AppleMatchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMatchIndex.swift; sourceTree = "<group>"; };
 		504FC21468920C914FD27E93 /* LICENSE */ = {isa = PBXFileReference; path = LICENSE; sourceTree = "<group>"; };
-		5AE910698E12B821BCE9AB25 /* MatchQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchQueueTests.swift; sourceTree = "<group>"; };
+		5531800E498596FA3A6AD89E /* ReviewClip.mp4 */ = {isa = PBXFileReference; path = ReviewClip.mp4; sourceTree = "<group>"; };
 		5B1F811A3C700E83E3AA26E6 /* SynologyPhotos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynologyPhotos.swift; sourceTree = "<group>"; };
 		5EE0D5C14776BBC42FE4362D /* LinkedPhoto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkedPhoto.swift; sourceTree = "<group>"; };
 		5F43670F9C5579A1CCCE497D /* SynologyConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynologyConnection.swift; sourceTree = "<group>"; };
@@ -52,12 +56,14 @@
 		72B45AD45BDC298AABFB489A /* ZIPFoundation-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "ZIPFoundation-LICENSE.txt"; sourceTree = "<group>"; };
 		74256485B488B72054A13F94 /* PicSwypeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PicSwypeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		74C8681D5928D1564FA5AF9E /* LinkedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkedTests.swift; sourceTree = "<group>"; };
-		7723FEF25427D50216EC6AC8 /* MatchQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchQueue.swift; sourceTree = "<group>"; };
 		81E813EBE086B35679130D5B /* PicSwype.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PicSwype.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		84A049D653A5FD6DD7B985D4 /* VideoReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoReview.swift; sourceTree = "<group>"; };
+		84CD75A01D239CECEA007285 /* LibrarySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySettings.swift; sourceTree = "<group>"; };
 		856249B1863023534C16442A /* LibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTests.swift; sourceTree = "<group>"; };
 		8F371A80E46CA556B6F3AC9E /* DeletionQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionQueue.swift; sourceTree = "<group>"; };
 		97F5FBBA1D6CA475FB910540 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AF398F3B7145BA1216B4D793 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		CC89CFA088401FACD24B8CCE /* SeenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeenStore.swift; sourceTree = "<group>"; };
 		CEED4F0A405626E6ABB45BD3 /* PhotoSources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSources.swift; sourceTree = "<group>"; };
 		D0F03D76CE1FB6D0D4690CA9 /* LivePair.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; path = LivePair.zip; sourceTree = "<group>"; };
 		E8A6956E5681DDCE64A38EFE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -83,7 +89,7 @@
 				856249B1863023534C16442A /* LibraryTests.swift */,
 				74C8681D5928D1564FA5AF9E /* LinkedTests.swift */,
 				D0F03D76CE1FB6D0D4690CA9 /* LivePair.zip */,
-				5AE910698E12B821BCE9AB25 /* MatchQueueTests.swift */,
+				5531800E498596FA3A6AD89E /* ReviewClip.mp4 */,
 				2B39FEC3DEA055BC1E2685E2 /* SynologyTests.swift */,
 			);
 			path = PicSwypeTests;
@@ -103,16 +109,19 @@
 			children = (
 				6CCBD0065F7B45F6F9FAAE76 /* AboutView.swift */,
 				AF398F3B7145BA1216B4D793 /* App.swift */,
+				4DA50E3D06D910165C3113B2 /* AppleMatchIndex.swift */,
 				EF6144FE080D39467DB826AF /* ApplePhotoDetails.swift */,
 				97F5FBBA1D6CA475FB910540 /* Assets.xcassets */,
 				8F371A80E46CA556B6F3AC9E /* DeletionQueue.swift */,
 				E8A6956E5681DDCE64A38EFE /* Info.plist */,
+				84CD75A01D239CECEA007285 /* LibrarySettings.swift */,
 				5EE0D5C14776BBC42FE4362D /* LinkedPhoto.swift */,
-				7723FEF25427D50216EC6AC8 /* MatchQueue.swift */,
 				CEED4F0A405626E6ABB45BD3 /* PhotoSources.swift */,
 				30012D856A05AD04E3B50B97 /* PrivacyInfo.xcprivacy */,
+				CC89CFA088401FACD24B8CCE /* SeenStore.swift */,
 				5F43670F9C5579A1CCCE497D /* SynologyConnection.swift */,
 				5B1F811A3C700E83E3AA26E6 /* SynologyPhotos.swift */,
+				84A049D653A5FD6DD7B985D4 /* VideoReview.swift */,
 				72B45AD45BDC298AABFB489A /* ZIPFoundation-LICENSE.txt */,
 			);
 			path = PicSwype;
@@ -216,6 +225,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BC4F11369B18CB8E1AAE33BB /* LivePair.zip in Resources */,
+				6AF756DC794426C61291E839 /* ReviewClip.mp4 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -240,7 +250,6 @@
 				5380738F9D102677B85CE0CD /* DeletionQueueTests.swift in Sources */,
 				749363A12A786C68033323AC /* LibraryTests.swift in Sources */,
 				D15B60D64DC05327F20B8FBC /* LinkedTests.swift in Sources */,
-				7A02ACC0D1F7D47E874AD843 /* MatchQueueTests.swift in Sources */,
 				435DEB3CA6EAE42BF1F20022 /* SynologyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -251,13 +260,16 @@
 			files = (
 				A2CAD01F7048F500686BB49B /* AboutView.swift in Sources */,
 				695DE0BB92BD700F1B4186E9 /* App.swift in Sources */,
+				0A64DF31BC8239691C86715E /* AppleMatchIndex.swift in Sources */,
 				64EA558A7CD40E0BB0107E7C /* ApplePhotoDetails.swift in Sources */,
 				78ECD3317807E5B41C960B52 /* DeletionQueue.swift in Sources */,
+				1ADC60130C38E4B1D0B4986C /* LibrarySettings.swift in Sources */,
 				8B194F62A01A5597AA111153 /* LinkedPhoto.swift in Sources */,
-				1ADCE014295BC7BCE364A253 /* MatchQueue.swift in Sources */,
 				E021289D123F48DB211396ED /* PhotoSources.swift in Sources */,
+				DD1418BF00B2CD6D9BC90E94 /* SeenStore.swift in Sources */,
 				13B99D7B2DEE30B4AAB03B3F /* SynologyConnection.swift in Sources */,
 				22C52E851A20B60496D4A055 /* SynologyPhotos.swift in Sources */,
+				D719EB3B01327F91FD806A2A /* VideoReview.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -277,7 +289,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 10;
 				INFOPLIST_FILE = PicSwype/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -312,7 +324,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 10;
 				INFOPLIST_FILE = PicSwype/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

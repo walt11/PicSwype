@@ -24,7 +24,7 @@
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSHumanReadableCopyright</key>
@@ -32,7 +32,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PicSwype connects to your Immich or Synology Photos server to show photos and delete the copies you select.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>PicSwype shows your Apple Photos, finds matching copies in linked libraries, and deletes the copies you select in the deletion queue.</string>
+	<string>PicSwype shows your photos and videos, finds matching copies in linked libraries, and deletes the copies you select in the deletion queue.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

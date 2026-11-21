@@ -1,3 +1,4 @@
+import AVFoundation
 import Photos
 import UIKit
 import ImageIO
@@ -15,12 +16,18 @@ enum AppleLibrary {
         }
     }
 
+    static func reviewAssets() -> PHFetchResult<PHAsset> {
+        let options = PHFetchOptions()
+        options.predicate = NSPredicate(format: "mediaType IN %@", [PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue])
+        return PHAsset.fetchAssets(with: options)
+    }
+
     static func images() async -> [Asset] {
         await Task.detached {
-            let result = PHAsset.fetchAssets(with: .image, options: nil)
+            let result = reviewAssets()
             var images: [Asset] = []
             result.enumerateObjects { photo, _, _ in
-                images.append(Asset(id: photo.localIdentifier, type: "IMAGE"))
+                images.append(Asset(id: photo.localIdentifier, type: photo.mediaType == .video ? "VIDEO" : "IMAGE"))
             }
             return images.shuffled()
         }.value
@@ -74,9 +81,9 @@ final class NASFolder {
             var images: [Asset] = []
             for case let file as URL in walk {
                 if ["#recycle", "@eaDir", "#snapshot"].contains(file.lastPathComponent) { walk.skipDescendants(); continue }
-                guard UTType(filenameExtension: file.pathExtension)?.conforms(to: .image) == true,
+                guard let type = UTType(filenameExtension: file.pathExtension), type.conforms(to: .image) || type.conforms(to: .movie),
                       try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
-                images.append(Asset(id: file.path, type: "IMAGE", originalFileName: file.lastPathComponent))
+                images.append(Asset(id: file.path, type: type.conforms(to: .movie) ? "VIDEO" : "IMAGE", originalFileName: file.lastPathComponent))
             }
             if let scanError { throw scanError }
             return images.shuffled()
@@ -92,7 +99,14 @@ final class NASFolder {
     }
 
     func preview(_ path: String) async throws -> UIImage {
-        try await Task.detached {
+        let file = URL(fileURLWithPath: path)
+        if UTType(filenameExtension: file.pathExtension)?.conforms(to: .movie) == true {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 1440, height: 1440)
+            return UIImage(cgImage: try await generator.image(at: .zero).image)
+        }
+        return try await Task.detached {
             var coordinationError: NSError?
             var thumbnail: CGImage?
             NSFileCoordinator().coordinate(readingItemAt: URL(fileURLWithPath: path), options: [], error: &coordinationError) { url in
