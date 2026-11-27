@@ -192,13 +192,16 @@ actor AppleMatchIndex {
             let file = directory.appending(path: key.cacheName)
             // Exact-size buckets are usually tiny. Avoid a cache file per photo.
             let persist = candidates.count > 1
-            var known = cache[key] ?? (persist ? read(file) : [:])
-            var dirty = false
+            let known = cache[key] ?? (persist ? read(file) : [:])
+            if cache[key] == nil { cache[key] = known }
+            var additions: [String: Cached] = [:]
             defer {
-                if generation == snapshot { cache[key] = known }
-                if generation == snapshot && dirty && persist {
-                    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    try? PropertyListEncoder().encode(known).write(to: file, options: .atomic)
+                if generation == snapshot && !additions.isEmpty {
+                    cache[key, default: [:]].merge(additions) { _, latest in latest }
+                    if persist, let merged = cache[key] {
+                        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                        try? PropertyListEncoder().encode(merged).write(to: file, options: .atomic)
+                    }
                 }
             }
             var byDigest: [Data: [String]] = [:]
@@ -223,8 +226,7 @@ actor AppleMatchIndex {
                     if let digest {
                         byDigest[digest, default: []].append(item.id)
                         if let modified = item.modified {
-                            known[item.id] = Cached(modified: modified, digest: digest)
-                            dirty = true
+                            additions[item.id] = Cached(modified: modified, digest: digest)
                         }
                     }
                     if let next = iterator.next() { enqueue(next) }

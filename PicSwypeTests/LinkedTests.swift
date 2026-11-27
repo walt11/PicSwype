@@ -15,6 +15,7 @@ private final class LinkFixture: URLProtocol {
     override func stopLoading() {}
     override func startLoading() {
         let url = request.url!
+        if url.host == "stalled.example", url.path.hasSuffix("/" + Self.id + "/original") { return }
         var body = request.httpBody ?? Data()
         if let stream = request.httpBodyStream {
             stream.open(); defer { stream.close() }
@@ -83,6 +84,45 @@ private final class LinkFixture: URLProtocol {
         XCTAssertTrue(restored.contains(id))
     }
     #endif
+
+    func testStalledVideoAllowsLaterChecksAndCanBeRetried() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [LinkFixture.self]
+        let immich = Library(.immich, session: URLSession(configuration: config), saveImmichKey: { _ in })
+        let priorServer = UserDefaults.standard.object(forKey: "server")
+        defer { UserDefaults.standard.set(priorServer, forKey: "server") }
+        immich.server = "https://stalled.example"
+        immich.key = "fixture"
+        await immich.connect()
+        let apple = Library(.apple)
+        let remote = try await SynologyPhotos(address: "https://nas.example", username: "test", configuration: config)
+        remote.resume("fixture")
+        let nas = Library(.synology, remote: remote)
+        await nas.connect()
+        let libraries = [immich, apple, nas]
+        let pair = try XCTUnwrap(LibraryLink.immichSynology.identity(immich: immich, nas: nas))
+        let suite = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let queue = DeletionQueue(defaults: defaults, matchTimeout: .seconds(1))
+        queue.configureMatching(libraries: libraries, linkedPair: pair)
+        queue.add(Asset(id: LinkFixture.id, type: "VIDEO"), from: immich)
+        let slow = try XCTUnwrap(queue.entries.first?.id)
+        for _ in 0..<3 { queue.add(Asset(id: UUID().uuidString, type: "IMAGE"), from: immich) }
+        for _ in 0..<100 where queue.entries.last?.found == nil { try await Task.sleep(for: .milliseconds(5)) }
+        let copy = QueueTarget(source: nas.source.rawValue, scope: nas.queueScope, id: "7")
+        XCTAssertTrue(queue.entries.dropFirst().allSatisfy { $0.found == [$0.origin, copy] })
+        XCTAssertTrue(queue.working)
+        for _ in 0..<200 where queue.working { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(queue.working)
+        XCTAssertNotNil(queue.matchFailures[slow])
+        XCTAssertNil(queue.entries.first?.found)
+        queue.retryMatching()
+        XCTAssertTrue(queue.working)
+        XCTAssertTrue(queue.matchFailures.isEmpty)
+        XCTAssertTrue(queue.removeUnstarted(id: LinkFixture.id, library: immich))
+        XCTAssertFalse(queue.working)
+    }
 
     func testLinkChoicesMatchFromEachSelectedLibrary() async throws {
         try await verifyLinkChoices(video: false)

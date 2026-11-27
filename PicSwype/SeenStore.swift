@@ -15,8 +15,7 @@ enum SeenStore {
         let legacy = progressKey + ".seen"
         if let ids = defaults.stringArray(forKey: legacy) {
             let set = Set(ids)
-            write(set, progressKey)
-            defaults.removeObject(forKey: legacy)
+            write(set, progressKey, defaults: defaults)
             return set
         }
         guard let text = try? String(contentsOf: url(progressKey), encoding: .utf8) else { return [] }
@@ -29,6 +28,12 @@ enum SeenStore {
     }
 
     static func append(_ id: String, _ progressKey: String) {
+        let legacy = progressKey + ".seen"
+        if var ids = UserDefaults.standard.stringArray(forKey: legacy) {
+            ids.append(id)
+            UserDefaults.standard.set(ids, forKey: legacy)
+            return
+        }
         guard let line = encode(id) else { return }
         let file = url(progressKey)
         if let handle = try? FileHandle(forWritingTo: file) {
@@ -41,16 +46,24 @@ enum SeenStore {
         }
     }
 
-    static func write(_ ids: Set<String>, _ progressKey: String) {
-        guard !ids.isEmpty else { return remove(progressKey) }
+    static func write(_ ids: Set<String>, _ progressKey: String, defaults: UserDefaults = .standard) {
         var data = Data()
         for id in ids { if let line = encode(id) { data.append(line) } }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: url(progressKey), options: .atomic)
+        let legacy = progressKey + ".seen"
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: url(progressKey), options: .atomic)
+            defaults.removeObject(forKey: legacy)
+        } catch {
+            defaults.set(Array(ids), forKey: legacy)
+        }
     }
 
     static func remove(_ progressKey: String) {
-        try? FileManager.default.removeItem(at: url(progressKey))
+        write([], progressKey)
+        if UserDefaults.standard.object(forKey: progressKey + ".seen") == nil {
+            try? FileManager.default.removeItem(at: url(progressKey))
+        }
     }
 
     private static func encode(_ id: String) -> Data? {

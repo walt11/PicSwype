@@ -39,9 +39,11 @@ struct DeletionEntry: Identifiable, Codable {
             if entries.count < oldValue.count {
                 let removed = Set(oldValue.map(\.id)).subtracting(entries.map(\.id))
                 for id in removed {
+                    stopMatch(id)
                     matchFailures.removeValue(forKey: id)
                     try? FileManager.default.removeItem(at: thumbnailURL(id))
                 }
+                scheduleMatching()
             }
         }
     }
@@ -53,13 +55,19 @@ struct DeletionEntry: Identifiable, Codable {
     private var libraries: [Library] = []
     private var matchingPair = ""
     private var revision = 0
-    private var worker: Task<Void, Never>?
+    private struct MatchJob {
+        let work: Task<Void, Never>
+        let timer: Task<Void, Never>
+    }
+    private var jobs: [UUID: MatchJob] = [:]
+    private let matchTimeout: Duration
     @Published private(set) var matchFailures: [UUID: String] = [:]
 
     func configureMatching(libraries: [Library], linkedPair: String) {
         self.libraries = libraries
         matchingPair = linkedPair
         revision += 1
+        for id in Array(jobs.keys) { stopMatch(id) }
         retryMatching()
     }
 
@@ -68,31 +76,46 @@ struct DeletionEntry: Identifiable, Codable {
         scheduleMatching()
     }
 
-    private var nextPending: DeletionEntry? {
-        entries.first {
-            $0.needsMatching(matchingPair) && matchFailures[$0.id] == nil
-        }
+    private func stopMatch(_ id: UUID) {
+        guard let job = jobs.removeValue(forKey: id) else { return }
+        job.work.cancel()
+        job.timer.cancel()
     }
 
     private func scheduleMatching() {
-        guard worker == nil, !libraries.isEmpty, !deleting, nextPending != nil else { return }
-        working = true
-        worker = Task(priority: .utility) {
-            defer { worker = nil; working = false; status = "" }
-            while let entry = nextPending {
-                let version = revision
+        guard !libraries.isEmpty, !deleting else { return }
+        for entry in entries {
+            if jobs.count >= 2 { break }
+            guard jobs[entry.id] == nil, matchFailures[entry.id] == nil, entry.needsMatching(matchingPair) else { continue }
+            let version = revision
+            let work = Task(priority: .utility) {
+                guard !Task.isCancelled else { return }
                 do {
                     try await prepare(entry, libraries: libraries, linkedPair: matchingPair, version: version)
                 } catch {
-                    if version == revision, entries.contains(where: { $0.id == entry.id }) {
-                        matchFailures[entry.id] = error.localizedDescription
-                    }
+                    guard !Task.isCancelled else { return }
+                    matchFailures[entry.id] = error.localizedDescription
                 }
+                guard !Task.isCancelled else { return }
+                jobs.removeValue(forKey: entry.id)?.timer.cancel()
+                scheduleMatching()
             }
+            let timer = Task {
+                do { try await Task.sleep(for: matchTimeout) } catch { return }
+                stopMatch(entry.id)
+                matchFailures[entry.id] = "Matching timed out. Retry when the original is available."
+                scheduleMatching()
+            }
+            jobs[entry.id] = MatchJob(work: work, timer: timer)
         }
+        working = !jobs.isEmpty
+        if jobs.count == 1, let entry = entries.first(where: { jobs[$0.id] != nil }) {
+            status = "Checking " + entry.name + "…"
+        } else { status = working ? "Checking two items…" : "" }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, matchTimeout: Duration = .seconds(300)) {
+        self.matchTimeout = matchTimeout
         self.defaults = defaults
         entries = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode([DeletionEntry].self, from: $0) } ?? []
     }
@@ -188,7 +211,6 @@ struct DeletionEntry: Identifiable, Codable {
         let link = LibraryLink(saved: linkedPair)
         let sources = link?.sources ?? []
         let linked = PhotoSource(rawValue: entry.origin.source).map(sources.contains) ?? false
-        status = "Checking " + entry.name + "…"
         if linked, let link, link.identity(immich: immich, nas: nas) != linkedPair {
             throw Failure(message: "Reconnect the accounts for " + link.title + " to check all copies.")
         }
@@ -213,6 +235,7 @@ struct DeletionEntry: Identifiable, Codable {
                 }
                 if sources.contains(.synology), let remote = nas.remote, model.source != .synology || model.folder != nil {
                     for id in remote.possibleCopies(byteCount: hash.count, filename: entry.name, includeUnknownSizes: true, video: hash.isVideo) {
+                        try Task.checkCancellation()
                         let candidate = hash.isVideo ? try await remote.downloadVideo(id).fingerprint() : try await LinkedPhoto.fingerprint(remote.original(id))
                         if candidate.digest == hash.digest { targets.insert(.init(source: PhotoSource.synology.rawValue, scope: nas.queueScope, id: id)) }
                     }
@@ -224,6 +247,7 @@ struct DeletionEntry: Identifiable, Codable {
                 targets.insert(.init(source: PhotoSource.apple.rawValue, scope: apple.queueScope, id: id))
             }
         }
+        try Task.checkCancellation()
         guard revision == version, let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         let exclusions = Set(entries.flatMap { $0.excluded ?? [] })
         var updated = entries[index]
@@ -376,6 +400,7 @@ struct DeletionEntry: Identifiable, Codable {
         for filter in [["checksum": hash.searchChecksum], ["originalFileName": filename]] {
             var page = 1
             while true {
+                try Task.checkCancellation()
                 var body: [String: Any] = filter
                 body["page"] = page
                 body["size"] = 100
@@ -403,6 +428,29 @@ struct DeletionEntry: Identifiable, Codable {
 
 }
 
+/// Cancellation can arrive before Photos returns its request ID.
+private final class PhotoDataRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var id: PHAssetResourceDataRequestID?
+    private var cancelled = false
+
+    func register(_ request: PHAssetResourceDataRequestID) {
+        let stop = lock.withLock {
+            id = request
+            return cancelled
+        }
+        if stop { PHAssetResourceManager.default().cancelDataRequest(request) }
+    }
+
+    func cancel() {
+        let request = lock.withLock {
+            cancelled = true
+            return id
+        }
+        if let request { PHAssetResourceManager.default().cancelDataRequest(request) }
+    }
+}
+
 enum AppleOriginal {
     static func name(_ id: String) -> String? {
         PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject.flatMap { PHAssetResource.assetResources(for: $0).first?.originalFilename }
@@ -413,15 +461,20 @@ enum AppleOriginal {
         guard resources.count == 1, let resource = resources.first, resource.type == .photo || resource.type == .video else { return nil }
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
-        return try await withCheckedThrowingContinuation { continuation in
-            var sha = SHA256(), search = Insecure.SHA1(), count = 0
-            PHAssetResourceManager.default().requestData(for: resource, options: options) { chunk in
-                sha.update(data: chunk); search.update(data: chunk); count += chunk.count
-            } completionHandler: { error in
-                if let error { continuation.resume(throwing: error) }
-                else { continuation.resume(returning: LinkedPhoto.Fingerprint(digest: Data(sha.finalize()), searchChecksum: Data(search.finalize()).base64EncodedString(), count: count, dimensions: .init(resource.pixelWidth, resource.pixelHeight), isVideo: resource.type == .video, taken: asset.creationDate, takenIsExact: true)) }
+        let request = PhotoDataRequest()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                var sha = SHA256(), search = Insecure.SHA1(), count = 0
+                let id = PHAssetResourceManager.default().requestData(for: resource, options: options) { chunk in
+                    sha.update(data: chunk); search.update(data: chunk); count += chunk.count
+                } completionHandler: { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume(returning: LinkedPhoto.Fingerprint(digest: Data(sha.finalize()), searchChecksum: Data(search.finalize()).base64EncodedString(), count: count, dimensions: .init(resource.pixelWidth, resource.pixelHeight), isVideo: resource.type == .video, taken: asset.creationDate, takenIsExact: true)) }
+                }
+                request.register(id)
             }
-        }
+        } onCancel: { request.cancel() }
     }
 
 }

@@ -111,6 +111,25 @@ private final class RepeatingImmichBatch: URLProtocol {
         XCTAssertEqual(SeenStore.load(key), ["b"])
     }
 
+    func testReviewHistorySurvivesUnavailableMigrationDirectory() throws {
+        let key = UUID().uuidString
+        let previousDirectory = SeenStore.directory
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: file)
+        defer {
+            SeenStore.directory = previousDirectory
+            SeenStore.remove(key)
+            try? FileManager.default.removeItem(at: file)
+        }
+        SeenStore.directory = file
+        UserDefaults.standard.set(["old"], forKey: key + ".seen")
+        XCTAssertEqual(SeenStore.load(key), ["old"])
+        SeenStore.append("new", key)
+        SeenStore.directory = previousDirectory
+        XCTAssertEqual(SeenStore.load(key), ["old", "new"])
+        XCTAssertNil(UserDefaults.standard.object(forKey: key + ".seen"))
+    }
+
     func testUnreadablePhotoIsSkippedNotMarkedReviewed() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
