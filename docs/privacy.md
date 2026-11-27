@@ -30,3 +30,7 @@ Apple may process beta feedback or diagnostics through TestFlight according to y
 For questions, contact John Walter through the [PicSwype project](https://github.com/walt11/PicSwype/issues). Issues are public. Please omit private photos, server addresses, passwords, and API keys.
 
 [PicSwype support](../support/)
+
+---
+
+Copyright © 2026 John Walter (walt11). PicSwype is distributed under the [MIT License](https://github.com/walt11/PicSwype/blob/main/LICENSE).
