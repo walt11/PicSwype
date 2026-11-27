@@ -97,7 +97,12 @@ struct LibrarySettings: View {
                         .disabled(active.busy || !active.connected)
                     Button("Restart review") { restart = true }.disabled(active.busy || !active.connected)
                 }
-                Button("About PicSwype") { showAbout = true }
+                Section {
+                    Button("About PicSwype") { showAbout = true }
+                    LicenseLink(title: "MIT License", resource: "LICENSE")
+                } footer: {
+                    Text(AboutView.copyright)
+                }
             }
             .navigationTitle("Settings")
             .navigationDestination(item: $editing) { source in
