@@ -13,6 +13,9 @@ struct AboutView: View {
                     Link("Privacy policy", destination: URL(string: "https://walt11.github.io/PicSwype/privacy/")!)
                     Link("Support", destination: URL(string: "https://walt11.github.io/PicSwype/support/")!)
                 }
+                Section("Affiliation") {
+                    Text("PicSwype is an independent app that works with Synology Photos and Immich. Neither Synology Inc. nor the Immich project sponsors or endorses PicSwype.")
+                }
                 Section("Licenses") {
                     LicenseLink(title: "PicSwype", resource: "LICENSE")
                     LicenseLink(title: "ZIPFoundation", resource: "ZIPFoundation-LICENSE", ext: "txt")
