@@ -16,4 +16,6 @@ Open `PicSwype.xcodeproj` in Xcode with an iOS SDK, let Swift Package Manager re
 
 ## Privacy and license
 
-Read the [privacy policy](https://walt11.github.io/PicSwype/). PicSwype is copyright © 2026 John Walter and distributed under the [MIT License](LICENSE). ZIPFoundation’s [MIT notice](PicSwype/ZIPFoundation-LICENSE.txt) is included in the app under **About PicSwype → Licenses**.
+[Privacy policy](https://walt11.github.io/PicSwype/privacy/) · [PicSwype support](https://walt11.github.io/PicSwype/support/)
+
+PicSwype is copyright © 2026 John Walter and distributed under the [MIT License](LICENSE). ZIPFoundation’s [MIT notice](PicSwype/ZIPFoundation-LICENSE.txt) is included in the app under **About PicSwype → Licenses**.

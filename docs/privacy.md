@@ -1,10 +1,11 @@
 ---
 title: PicSwype privacy policy
+permalink: /privacy/
 ---
 
 # PicSwype privacy policy
 
-Effective November 20, 2026
+Updated November 27, 2026
 
 PicSwype is a photo and video review app by John Walter. You choose which libraries it can access. The developer does not operate a photo server, receive your library or review history, sell personal information, or use advertising or analytics SDKs in the app.
 
@@ -27,3 +28,5 @@ Apple may process beta feedback or diagnostics through TestFlight according to y
 ## Contact
 
 For questions, contact John Walter through the [PicSwype project](https://github.com/walt11/PicSwype/issues). Issues are public. Please omit private photos, server addresses, passwords, and API keys.
+
+[PicSwype support](../support/)
